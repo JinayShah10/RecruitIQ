@@ -74,26 +74,25 @@ Detailed documentation is available in the [`docs/`](./docs) directory, organize
 | [Product Specification](./docs/04_Product_Specification.md) | Detailed product specification |
 | [System Architecture](./docs/05_System_Architecture.md) | System design and architecture |
 | [Database Design](./docs/06_Database_Design.md) | Database schema and design decisions |
-| [API Design](./docs/07_API_Design.md) | API endpoints and contracts |
-| [AI Architecture](./docs/08_AI_Architecture.md) | AI/ML modules and integration |
-| [Frontend Architecture](./docs/09_Frontend_Architecture.md) | Frontend structure and patterns |
-| [Backend Architecture](./docs/10_Backend_Architecture.md) | Backend structure and patterns |
+| [Backend Architecture](./docs/07_Backend_Architecture.md) | Backend structure and patterns |
+| [API Design](./docs/08_API_Design.md) | API endpoints and contracts |
+| [AI Architecture](./docs/09_AI_Architecture.md) | AI/ML modules and integration |
+| [Frontend Architecture](./docs/10_Frontend_Architecture.md) | Frontend structure and patterns |
 | [UI/UX Design](./docs/11_UI_UX_Design.md) | Design system and user experience |
-| [Development Roadmap](./docs/12_Development_Roadmap.md) | Sprint plan and milestones |
-| [Testing Strategy](./docs/13_Testing_Strategy.md) | Testing approach and coverage |
-| [Deployment Guide](./docs/14_Deployment_Guide.md) | Deployment and infrastructure |
-| [Future Roadmap](./docs/15_Future_Roadmap.md) | Long-term vision and features |
+| [Testing Strategy](./docs/12_Testing_Strategy.md) | Testing approach and coverage |
+| [Deployment Guide](./docs/13_Deployment_Guide.md) | Deployment and infrastructure |
+| [Future Roadmap](./docs/14_Future_Roadmap.md) | Long-term vision and features |
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React, Vite |
-| Backend | Node.js, Express |
-| Database | MongoDB, Mongoose |
-| AI | Google Gemini API |
-| Authentication | JWT |
-| Storage | Cloudinary |
+| Frontend | React 19, Vite, TypeScript, Tailwind CSS, shadcn/ui |
+| Backend | Node.js, Express.js, TypeScript |
+| Database | MongoDB Atlas, Mongoose |
+| AI | LangChain, Groq |
+| Authentication | JWT, bcrypt |
+| Storage | Supabase Storage |
 | Deployment | Vercel (Frontend), Render (Backend) |
 
 ## License

@@ -110,9 +110,8 @@ The integration sequence behaves as follows:
 
 The physical deployment architecture maps components to specialized cloud hosts to simplify maintenance and scale without configuration overhead.
 
-| Component | Target Platform | Environment | Scaling Policy |
-| --- | --- | --- | --- |
-| **Frontend SPA** | Vercel | Production CDN Edge | Automated CDN caching and edge delivery |
-| **Backend REST API** | Render | Managed Node.js Container | Manual or automated container horizontal scaling |
-| **Document Database** | MongoDB Atlas | Managed Multi-region Cluster | Managed database replication and scaling |
-| **File Storage** | Supabase Storage | S3-Compatible Cloud Storage | Elastic bucket scaling |
+The React frontend single-page application is deployed to Vercel, utilising its Edge Network to cache and deliver static assets globally with minimal latency.
+
+The backend Express REST API is hosted on Render within a managed Node.js container environment. This setup allows horizontal scaling to accommodate changes in traffic volume.
+
+The persistence layers utilize managed cloud infrastructure: database operations run on MongoDB Atlas within a multi-region cluster to ensure high availability, and uploaded files are stored in Supabase Storage, an S3-compatible elastically scaled bucket system.

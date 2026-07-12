@@ -3,15 +3,19 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import app from './app';
+import { connectDatabase } from './config/database';
 
 const PORT = process.env.PORT || 8000;
 
-const startServer = (): void => {
+const startServer = async (): Promise<void> => {
   try {
+    // 1. Connect to MongoDB Atlas
+    await connectDatabase();
+
+    // 2. Start Express server only after successful connection
     const server = app.listen(PORT, () => {
       /* eslint-disable no-console */
-      console.log(`[INFO] RecruitIQ Backend Server started successfully.`);
-      console.log(`[INFO] Listening on port: ${PORT}`);
+      console.log(`✓ Server running on PORT ${PORT}`);
       console.log(`[INFO] Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`[INFO] Health check available at: http://localhost:${PORT}/health`);
       /* eslint-enable no-console */
@@ -26,7 +30,7 @@ const startServer = (): void => {
   } catch (error) {
     /* eslint-disable no-console */
     console.error(
-      '[FATAL] Server initialization failed:',
+      '[FATAL] Server startup sequence aborted:',
       error instanceof Error ? error.message : error
     );
     /* eslint-enable no-console */

@@ -1,5 +1,7 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import { notFoundHandler } from './middleware/not-found-handler';
+import { errorHandler } from './middleware/error-handler';
 
 const app = express();
 
@@ -15,5 +17,11 @@ app.get('/health', (req: Request, res: Response) => {
     message: 'RecruitIQ API is running',
   });
 });
+
+// 404 Handler for Undefined Routes
+app.use(notFoundHandler);
+
+// Global Error Handler
+app.use(errorHandler);
 
 export default app;

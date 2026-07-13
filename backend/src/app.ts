@@ -4,6 +4,7 @@ import { notFoundHandler } from './middleware/not-found-handler';
 import { errorHandler } from './middleware/error-handler';
 
 import authRoutes from './routes/auth.routes';
+import jobRoutes from './routes/job.routes';
 
 const app = express();
 
@@ -14,6 +15,9 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mounting Authentication Routes
 app.use(authRoutes);
+
+// Mounting Jobs Routes
+app.use(jobRoutes);
 
 // Health Check Endpoint
 app.get('/health', (req: Request, res: Response) => {

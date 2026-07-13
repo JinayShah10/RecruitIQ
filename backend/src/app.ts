@@ -3,12 +3,17 @@ import cors from 'cors';
 import { notFoundHandler } from './middleware/not-found-handler';
 import { errorHandler } from './middleware/error-handler';
 
+import authRoutes from './routes/auth.routes';
+
 const app = express();
 
 // Global Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Mounting Authentication Routes
+app.use(authRoutes);
 
 // Health Check Endpoint
 app.get('/health', (req: Request, res: Response) => {

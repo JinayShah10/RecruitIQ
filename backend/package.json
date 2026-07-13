@@ -15,6 +15,7 @@
     "argparse": "^2.0.1",
     "array-flatten": "^1.1.1",
     "balanced-match": "^1.0.2",
+    "bcrypt": "^6.0.0",
     "binary-extensions": "^2.3.0",
     "body-parser": "^1.20.6",
     "brace-expansion": "^1.1.16",
@@ -100,6 +101,7 @@
     "json-buffer": "^3.0.1",
     "json-schema-traverse": "^0.4.1",
     "json-stable-stringify-without-jsonify": "^1.0.1",
+    "jsonwebtoken": "^9.0.3",
     "keyv": "^4.5.4",
     "levn": "^0.4.1",
     "locate-path": "^6.0.0",
@@ -181,7 +183,8 @@
     "wrappy": "^1.0.2",
     "xtend": "^4.0.2",
     "yn": "^3.1.1",
-    "yocto-queue": "^0.1.0"
+    "yocto-queue": "^0.1.0",
+    "zod": "^4.4.3"
   },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
@@ -193,8 +196,10 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.1.1",
     "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.63.0",

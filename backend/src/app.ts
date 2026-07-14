@@ -6,6 +6,7 @@ import { errorHandler } from './middleware/error-handler';
 import authRoutes from './routes/auth.routes';
 import jobRoutes from './routes/job.routes';
 import resumeRoutes from './routes/resume.routes';
+import applicationRoutes from './routes/application.routes';
 
 const app = express();
 
@@ -22,6 +23,10 @@ app.use(jobRoutes);
 
 // Mounting Resume Routes
 app.use(resumeRoutes);
+
+// Mounting Application Routes
+app.use(applicationRoutes);
+
 
 
 // Health Check Endpoint

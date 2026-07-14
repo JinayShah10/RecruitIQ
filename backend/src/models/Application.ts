@@ -4,9 +4,9 @@ export interface IApplication extends Document {
   candidateId: mongoose.Types.ObjectId;
   jobId: mongoose.Types.ObjectId;
   resumeId: mongoose.Types.ObjectId;
-  status: string;
-  aiStatus: string;
+  status: 'Received' | 'Under Review' | 'Shortlisted' | 'Rejected';
   appliedAt: Date;
+  createdAt: Date;
   updatedAt: Date;
 }
 
@@ -29,24 +29,18 @@ const ApplicationSchema: Schema = new Schema<IApplication>(
     },
     status: {
       type: String,
-      enum: ['Applied', 'Shortlisted', 'Interview', 'Rejected', 'Hired'],
+      enum: ['Received', 'Under Review', 'Shortlisted', 'Rejected'],
+      default: 'Received',
       required: [true, 'Application status is required'],
-      trim: true,
-    },
-    aiStatus: {
-      type: String,
-      enum: ['Pending', 'Processing', 'Completed', 'Failed'],
-      required: [true, 'AI processing status is required'],
       trim: true,
     },
     appliedAt: {
       type: Date,
       default: Date.now,
     },
-    updatedAt: {
-      type: Date,
-      default: Date.now,
-    },
+  },
+  {
+    timestamps: true,
   }
 );
 

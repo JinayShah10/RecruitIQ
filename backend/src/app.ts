@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.routes';
 import jobRoutes from './routes/job.routes';
 import resumeRoutes from './routes/resume.routes';
 import applicationRoutes from './routes/application.routes';
+import dashboardRoutes from './routes/dashboard.routes';
 
 const app = express();
 
@@ -26,6 +27,10 @@ app.use(resumeRoutes);
 
 // Mounting Application Routes
 app.use(applicationRoutes);
+
+// Mounting Dashboard Routes
+app.use(dashboardRoutes);
+
 
 
 

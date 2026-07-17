@@ -1,321 +1,63 @@
 # AI Architecture
 
-This document details the Artificial Intelligence architecture, pipeline workflow, prompt engineering strategies, and Retrieval-Augmented Generation (RAG) implementation for the RecruitIQ platform. 
+This document details the redesigned Artificial Intelligence (AI) architecture, pipeline workflows, Retrieval-Augmented Generation (RAG) system, and engineering decisions implemented inside RecruitIQ.
 
-The AI pipeline is designed to provide automated, objective, and consistent screening of candidate resumes against job descriptions, delivering structured evaluations directly to recruiters immediately upon application submission.
-
----
-
-## 1. Overview
-
-The primary objective of the RecruitIQ AI architecture is to automate the preliminary resume screening process. By extracting text from unstructured resume documents, parsing them into structured JSON, retrieving domain-specific guidelines using RAG, and performing semantic evaluation via a Large Language Model (LLM), the platform removes manual screening bottlenecks and reduces cognitive bias.
-
-### Integration with RecruitIQ
-The AI system is implemented as a decoupled microservice that operates alongside the core backend service. 
-*   **Asynchronous Processing:** Immediately after a candidate applies for a job, the Express backend registers the application and dispatches a request to the AI service. This offloads compute-heavy document processing, text parsing, and LLM orchestration, preventing blockages in client-facing API responses.
-*   **Immediate Availability:** Recruiters do not need to manually trigger resume analysis. The results are generated in the background and stored directly in the database, allowing recruiters to view comprehensive candidate analyses instantly upon opening their dashboard.
+The AI system is designed to provide automated, objective, and consistent screening of candidate resumes against job requisitions, delivering structured evaluations directly to recruiters immediately upon application submission.
 
 ---
 
-## 2. AI Service Architecture
+## 1. System Overview
 
-The RecruitIQ AI stack is structured to isolate processing duties, utilize dedicated high-speed inference, and ground model evaluations with structured recruitment knowledge.
+RecruitIQ partitions its transactional web framework from its computationally intensive AI capabilities. The AI Service is completely independent of the core backend application, operating as a standalone microservice that exposes RESTful endpoints. 
+
+### Decoupled Architectural Stack
+
+The complete RecruitIQ architecture operates through the following data and processing pipeline:
 
 ```mermaid
-graph LR
+graph TD
     subgraph Client Tier [Client Tier]
-        A[React SPA]
+        A[React + TypeScript SPA]
     end
 
     subgraph Core Backend [Core Backend]
-        B[Express.js REST API]
+        B[Express + TypeScript REST API]
     end
 
-    subgraph AI Service [AI Service Microservice]
-        C[Python FastAPI Service]
-        D[RAG Retrieval Engine]
-        E[Groq LLM Connector]
+    subgraph Persistence Layer [Persistence Layer]
+        C[(MongoDB Atlas)]
+        D[Supabase Cloud Storage]
     end
 
-    subgraph Data & Storage Tier [Data & Storage Tier]
-        F[(MongoDB Atlas)]
-        G[Supabase Cloud Storage]
-        H[(Vector Database)]
+    subgraph AI Tier [AI Service Tier]
+        E[Python FastAPI AI Service]
+        F[(ChromaDB Vector DB)]
+        G[Groq LLM Inference API]
     end
 
-    A -->|1. Submit Application| B
-    B -->|2. HTTP POST Trigger| C
-    C -->|3. Get Resume Binary| G
-    C -->|4. Retrieve Context| H
-    C -->|5. Run Inference| E
-    C -->|6. Return Parsed JSON| B
-    B -->|7. Persist Analysis| F
+    A -->|1. Applies & Uploads| B
+    B -->|2. Save Raw Resume| D
+    B -->|3. POST /analyze| E
+    E -->|4. Download Resume| D
+    E -->|5. Query Context| F
+    E -->|6. Execute RAG Prompt| G
+    E -->|7. Return JSON Payload| B
+    B -->|8. Persist structured JSON & Scores| C
+    A -->|9. View Analysis Instantly| B
 ```
 
-### Component Responsibilities
+### Integration Boundaries & Communication Protocols
 
-| Component | Responsibility / Role in AI Pipeline |
-| :--- | :--- |
-| **Express Backend** | Serves as the primary transaction coordinator. It handles client requests, stores the raw resume files in Supabase Storage, registers applications, initiates the AI analysis by calling the FastAPI microservice, receives the processed result, and writes the structured records to MongoDB Atlas. |
-| **FastAPI AI Service** | A high-performance Python microservice optimized for data engineering, text extraction, and machine learning pipelines. It manages the lifecycle of the AI request, downloads files, extracts and cleans text, queries the Vector Database, builds prompts, and manages Groq LLM API communication. |
-| **Vector Database** | Indexes high-dimensional embeddings representing professional recruiting guidelines, ATS heuristics, and resume writing benchmarks. It provides semantic search capabilities to retrieve relevant context based on job requirements and candidate profiles. |
-| **Groq LLM API** | Serves as the high-speed inference provider. It runs Llama-based LLMs to perform candidate assessment, resume structure parsing, and detailed text synthesis according to prompt parameters. |
-| **Supabase Storage** | Retains raw resume binaries (PDF and DOCX). The FastAPI service accesses these buckets using secure read URLs to retrieve document binaries for processing. |
-| **MongoDB Atlas** | Houses candidate data, resume parsed records (`Resume.parsedData`), and the generated AI evaluation summaries (`AIAnalysis` collection) to enable fast dashboard loading. |
+*   **RESTful Interface:** The Express backend communicates with the Python FastAPI AI service exclusively through standard HTTP REST APIs.
+*   **MongoDB Isolation:** The FastAPI AI service never connects directly to MongoDB Atlas. It remains completely stateless regarding the primary application database.
+*   **Result Persistence:** The Express backend remains responsible for receiving the structured AI evaluations, updating the `Resume` collection, writing the `AIAnalysis` document, and managing state transitions.
+*   **Storage Access:** The FastAPI AI service interacts with Supabase Cloud Storage via secure download URLs provided in the API trigger payload, isolating file storage access patterns.
 
 ---
 
-## 3. End-to-End AI Workflow
+## 2. End-to-End AI Workflow
 
-The AI analysis workflow follows a fully automated sequence triggered by the candidate's application submission. There is no manual intervention or "Analyze" step required by recruiters during standard intake.
-
-### Operational Sequence Flowchart
-
-```mermaid
-graph TD
-    A([Candidate Applies to Job]) --> B[Express Backend creates Application record]
-    B --> C[Express Backend dispatches HTTP POST payload to FastAPI]
-    C --> D[FastAPI retrieves Resume binary from Supabase Storage]
-    D --> E[FastAPI extracts and cleanses plain text from document]
-    E --> F[FastAPI structures resume text into Metadata JSON]
-    F --> G[FastAPI queries Vector DB using job and candidate embeddings]
-    G --> H[FastAPI constructs Prompt using Job, Resume, and RAG context]
-    H --> I[FastAPI requests inference from Groq LLM]
-    I --> J[FastAPI validates returned JSON structure against schema]
-    J --> K[FastAPI returns parsed analysis object to Express Backend]
-    K --> L[Express Backend updates MongoDB Resume collection]
-    L --> M[Express Backend creates MongoDB AIAnalysis document]
-    M --> N([Recruiter views analysis results instantly on Dashboard])
-```
-
-1.  **Application Initiation:** A candidate uploads a resume and submits an application through the React frontend.
-2.  **Asset Storage:** The Express backend uploads the raw file binary to Supabase Storage, generating a unique asset URI, and inserts the `Application` document into MongoDB.
-3.  **Microservice Activation:** Express immediately makes a POST request to the FastAPI endpoint `/api/v1/analyze` containing the `applicationId`, `resumeUrl`, and `jobDescription` text.
-4.  **Resource Fetching:** The FastAPI service fetches the resume binary from the provided Supabase URL.
-5.  **Text Extraction & Structuring:** FastAPI converts the document to raw text, cleanses formatting metadata, and structures the candidate's core profile parameters.
-6.  **RAG Context Retrieval:** The service queries the Vector Database using embeddings representing the job description and candidate experience to isolate matching guidelines.
-7.  **LLM Call:** FastAPI compiles a prompt containing the job description, structured candidate details, RAG guidelines, and expected JSON formatting. This prompt is submitted to the Groq API.
-8.  **Output Parsing & Validation:** The FastAPI service parses Groq's output, verifies that all expected metrics and text lists are populated, and returns a structured JSON payload to the Express backend.
-9.  **Database Sync:** Express writes the structured profile to the `Resume` collection under `parsedData` and writes the scoring metrics, summary, and suggestions into the `AIAnalysis` collection, referencing the `applicationId`.
-10. **Recruiter Delivery:** When the recruiter accesses the job applicant list, the frontend loads the saved analysis instantly from MongoDB.
-
----
-
-## 4. Resume Processing Pipeline
-
-The FastAPI microservice implements a multi-stage data ingestion pipeline to convert raw binary resume files into standard JSON records.
-
-```mermaid
-graph LR
-    A[Raw File URL] --> B[Supabase Download]
-    B --> C[Format Detector]
-    C -->|PDF| D[PyPDF / PDFPlumber]
-    C -->|DOCX| E[python-docx]
-    D & E --> F[Text Cleansing Engine]
-    F --> G[Pydantic Schema Parser]
-    G --> H[Structured JSON Metadata]
-```
-
-### 1. Resume Download
-The pipeline retrieves the document file stream from Supabase Cloud Storage using secure HTTPS connections. The file content is held in memory buffers to avoid local disk writing and security vulnerabilities.
-
-### 2. Text Extraction
-The service automatically reads the file extension and delegates extraction to specialized libraries:
-*   **PDF Documents:** PyPDF or PDFPlumber extracts raw string characters, preserving line endings where possible.
-*   **DOCX Documents:** python-docx parses the XML structure, extracting paragraph text and tables.
-
-### 3. Text Cleansing
-The extracted plain text undergoes cleaning to strip noise and reduce token consumption:
-*   Removal of non-printable ASCII and control characters.
-*   Standardization of whitespace (collapsing multiple spaces and tabs).
-*   Stripping of repetitive document headers, footers, and page numbers.
-*   Normalization of common bullet points and hyphen variants.
-
-### 4. Structured JSON Parsing
-The cleaned text is processed using a fast initial schema parsing prompt to output a basic candidate schema. This structures unstructured text blocks into discrete sections: Personal Information, Work Experience, Education, and Skills. The FastAPI application validates the structure using **Pydantic** models before it is forwarded to the matching evaluation stage.
-
----
-
-## 5. RAG Architecture
-
-The matching engine uses Retrieval-Augmented Generation (RAG) to ensure LLM evaluations are grounded in industry standards rather than arbitrary parametric assumptions.
-
-```mermaid
-graph TD
-    subgraph Vector Database Ingestion
-        A[ATS Guidelines] & B[Recruiting Best Practices] & C[Industry Skill Matrices] --> D[Chunking & Overlap Engine]
-        D --> E[Embedding Model]
-        E --> F[(Vector Database Index)]
-    end
-
-    subgraph Retrieval Pipeline
-        G[Job Description] & H[Parsed Resume] --> I[Generate Query Embedding]
-        I --> J{Vector Similarity Search}
-        F --> J
-        J -->|Top K Matches| K[Retrieved Recruiting Context]
-    end
-```
-
-### Knowledge Base
-The Vector Database houses a corpus of recruitment-specific domain knowledge. The datasets include:
-*   **ATS Guidelines:** Specific benchmarks detailing how resumes should be structured for high readability, how skills should be presented, and common parsing limitations.
-*   **Recruiter Best Practices:** Industry guidelines for matching experience years to specific seniority levels, assessing candidate trajectory, and spotting red flags.
-*   **Resume Writing Guides:** Standards outlining high-impact, results-oriented resume conventions.
-*   **Action Verb References:** Taxonomies of strong action verbs linked to candidate accomplishments (e.g., "Led", "Optimized", "Engineered").
-*   **Industry Hiring Articles:** Domain matrices mapping tech stacks to specific job categories, helping the LLM understand semantic relationships between related technologies (e.g., that React, Vue, and Angular represent front-end skills).
-
-### Processing Strategy
-1.  **Chunking:** The knowledge documents are divided using a recursive text splitter with a chunk size of 800 characters and a 10% overlap (80 characters) to ensure semantic boundaries are maintained.
-2.  **Embedding Generation:** Each chunk is converted into a 1536-dimensional vector using a high-density embedding model and stored in the Vector Database.
-3.  **Retrieval Logic:** When an application is analyzed, the system generates query embeddings from the job description and candidate's work history. It queries the Vector Database using cosine similarity to retrieve the top $K$ (typically $K=3$) most relevant chunks.
-4.  **Context Injection:** The retrieved chunks are formatted as a text block and injected into the LLM system prompt as the "Reference Evaluation Guidelines".
-
-### Benefits of RAG in RecruitIQ
-*   **Reduced Hallucination:** The LLM does not invent arbitrary scores; it evaluates candidate alignment strictly using the injected recruiting standards.
-*   **Contextual Understanding:** RAG injects industry matrices, enabling the system to recognize that a candidate with "Express" and "FastAPI" experience meets backend requirements, even if the job description specifically asks for "Node.js".
-*   **Actionable Feedback:** Resume suggestions are drawn directly from official resume-writing guides, ensuring that candidates receive practical, structured improvement recommendations.
-
----
-
-## 6. Prompt Engineering
-
-The matching evaluation relies on a multi-layered prompt designed to enforce structured JSON output and ensure objective scoring.
-
-### Prompt Construction
-The prompt is constructed dynamically by the FastAPI prompt engine, combining six independent content modules:
-
-```
-┌──────────────────────────────────────────────────────────┐
-│ 1. System Prompt (Role, Anti-bias directives, JSON mandate)│
-├──────────────────────────────────────────────────────────┤
-│ 2. Job Description (Title, requirements, duties)          │
-├──────────────────────────────────────────────────────────┤
-│ 3. Parsed Candidate Resume (JSON profile schema)          │
-├──────────────────────────────────────────────────────────┤
-│ 4. Retrieved Context (RAG guidelines, ATS standards)     │
-├──────────────────────────────────────────────────────────┤
-│ 5. Scoring & Assessment Instructions                      │
-├──────────────────────────────────────────────────────────┤
-│ 6. Output Format Definition (Strict JSON outline)       │
-└──────────────────────────────────────────────────────────┘
-```
-
-1.  **System Prompt:** Defines the persona of a Senior Technical Recruiter and ATS Auditor. It commands the model to remain neutral, objective, and focus strictly on the candidate's alignment with the provided requirements.
-2.  **Job Description:** Injects the target job requirements.
-3.  **Parsed Resume:** Injects the structured candidate data (`parsedData`) retrieved during the resume parsing phase.
-4.  **Retrieved Context:** Injects the relevant guidelines retrieved from the RAG vector index.
-5.  **Assessment Instructions:** Details how to evaluate each dimension:
-    *   *ATS Score:* Based on structural readability, formatting, and standard parsing layout.
-    *   *Technical Score:* Hard capability matching.
-    *   *Experience Score:* Years of experience, level of responsibility, and career progression.
-    *   *Education Score:* Degree relevance and level compared to job prerequisites.
-6.  **Expected JSON Output:** Enforces output formatting. The prompt explicitly orders the model to output a valid JSON object without markdown headers, greeting messages, or trailing text.
-
----
-
-## 7. Analysis Output
-
-The result returned by the Groq inference engine and validated by FastAPI is a structured JSON payload. The following table describes the schema fields:
-
-| Field Name | Type | Description | Scoring / Generation Heuristics |
-| :--- | :--- | :--- | :--- |
-| `summary` | String | Executive profile summary detailing the candidate's suitability. | Generates a 3-4 sentence summary emphasizing the candidate's core competencies and career alignment. |
-| `overallScore` | Number | A comprehensive score from 0 to 100. | Calculated as a weighted average: Technical (35%), Experience (35%), ATS (15%), and Education (15%). |
-| `atsScore` | Number | Score from 0 to 100 assessing layout, formatting, and keyword optimizations. | Deducts points for nested graphics, tables, non-standard fonts, or missing contact/profile sections. |
-| `technicalScore` | Number | Score from 0 to 100 assessing hard skill alignment. | Measures direct and secondary overlaps between job requirements and candidate's declared technologies. |
-| `experienceScore` | Number | Score from 0 to 100 assessing work history depth. | Evaluates direct tenure, career progression, domain-relevant titles, and scope of responsibilities. |
-| `educationScore` | Number | Score from 0 to 100 assessing academic qualifications. | Evaluates highest degree completed, matching of major/field of study, and minimum job education requirements. |
-| `matchedSkills` | Array[String] | Skills present in the resume that match job requirements. | Extracts direct keyword matches and high-confidence semantic synonyms. |
-| `missingSkills` | Array[String] | Required skills from the job description not present in the resume. | Identifies gaps between core job requirements and the candidate's profile. |
-| `strengths` | Array[String] | Categorized professional highlights of the candidate. | Focuses on areas where the candidate exceeds requirements (e.g., senior leadership experience). |
-| `weaknesses` | Array[String] | Identified qualifications gaps or areas of concern. | Identifies areas where the candidate falls short (e.g., lack of experience with a primary tool, short tenures). |
-| `recommendation` | String | Actionable hiring decision indicator. | Restricts to predefined categories: `Strong Match`, `Good Match`, `Borderline Match`, or `Unsuitable`. |
-| `improvementSuggestions` | Array[String] | Steps the candidate can take to optimize their resume. | Provides suggestions for editing resume phrasing, adding missing sections, or formatting changes. |
-
----
-
-## 8. Data Persistence
-
-The Express backend coordinates data persistence across MongoDB Atlas, separating application transactions, parsed profiles, and detailed evaluations.
-
-### 1. Resume Collection (`Resume`)
-Stores the parsed resume structure. This data is persistent and can be reused if the candidate applies to other jobs within the system.
-```json
-{
-  "_id": "ObjectId",
-  "candidateId": "ObjectId (ref: Candidate)",
-  "fileUrl": "String (Supabase Storage URL)",
-  "parsedData": {
-    "contactInfo": {
-      "name": "String",
-      "email": "String",
-      "phone": "String"
-    },
-    "skills": ["String"],
-    "experience": [
-      {
-        "title": "String",
-        "company": "String",
-        "duration": "String",
-        "description": "String"
-      }
-    ],
-    "education": [
-      {
-        "school": "String",
-        "degree": "String",
-        "fieldOfStudy": "String",
-        "gradYear": "Number"
-      }
-    ]
-  },
-  "createdAt": "Date",
-  "updatedAt": "Date"
-}
-```
-
-### 2. AIAnalysis Collection (`AIAnalysis`)
-Stores the assessment evaluation. This document maintains a strict **One-to-One** relationship with the `Application` collection.
-```json
-{
-  "_id": "ObjectId",
-  "applicationId": "ObjectId (ref: Application)",
-  "summary": "String",
-  "overallScore": "Number",
-  "atsScore": "Number",
-  "technicalScore": "Number",
-  "experienceScore": "Number",
-  "educationScore": "Number",
-  "matchedSkills": ["String"],
-  "missingSkills": ["String"],
-  "strengths": ["String"],
-  "weaknesses": ["String"],
-  "recommendation": "String",
-  "improvementSuggestions": ["String"],
-  "createdAt": "Date",
-  "updatedAt": "Date"
-}
-```
-
-### 3. Application Collection (`Application`)
-Maintains the transactional reference mapping of candidate applications.
-```json
-{
-  "_id": "ObjectId",
-  "candidateId": "ObjectId (ref: Candidate)",
-  "jobId": "ObjectId (ref: Job)",
-  "resumeId": "ObjectId (ref: Resume)",
-  "status": "String (Enum: Received, Under Review, Shortlisted, Rejected)",
-  "createdAt": "Date",
-  "updatedAt": "Date"
-}
-```
-
----
-
-## 9. Sequence Diagram
-
-The following sequence diagram illustrates the end-to-end interactions between the candidate, services, database engines, and storage nodes:
+The AI processing pipeline is fully automated and triggered immediately upon candidate submission. Recruiters do not need to click an "Analyze Resume" or "Process" button; evaluation occurs asynchronously in the background.
 
 ```mermaid
 sequenceDiagram
@@ -324,57 +66,354 @@ sequenceDiagram
     participant Express as Express Backend
     participant Supabase as Supabase Storage
     participant FastAPI as FastAPI AI Service
-    participant VectorDB as Vector Database
+    participant Chroma as ChromaDB Vector DB
     participant Groq as Groq LLM API
     participant MongoDB as MongoDB Atlas
-    actor Recruiter as Recruiter
+    actor Recruiter as Recruiter Dashboard
 
-    Candidate->>Express: Apply to Job (Upload Resume file + data)
+    Candidate->>Express: Apply for Job (Upload Resume)
     activate Express
-    Express->>Supabase: Upload raw Resume file
-    Supabase-->>Express: Return file storage URL (fileUrl)
-    Express->>MongoDB: Create Application and Resume (draft state)
+    Express->>Supabase: Store Resume (PDF/DOCX)
+    Supabase-->>Express: Return Public URL
+    Express->>MongoDB: Create Application (Status: Received)
+    Express->>FastAPI: Trigger Analysis (POST /analyze with Resume URL & Job details)
+    deactivate Express
     
-    Express->>FastAPI: Trigger AI Analysis (POST application details & fileUrl)
     activate FastAPI
-    FastAPI->>Supabase: Download raw Resume binary
-    Supabase-->>FastAPI: Return binary stream
-    FastAPI->>FastAPI: Extract text & structure basic JSON metadata
-    
-    FastAPI->>VectorDB: Query embeddings for evaluation guidelines (RAG)
-    VectorDB-->>FastAPI: Return matching recruiting standards
-    
-    FastAPI->>FastAPI: Build evaluation Prompt template
-    FastAPI->>Groq: Request LLM Inference (Job + Resume JSON + RAG Context)
-    Groq-->>FastAPI: Return validated JSON assessment payload
-    
-    FastAPI-->>Express: Return structured JSON payload
+    FastAPI->>Supabase: Download Resume Binary
+    Supabase-->>FastAPI: Resume Stream
+    FastAPI->>FastAPI: Extract Text Content & Clean Format
+    FastAPI->>FastAPI: Parse Text to Structured JSON
+    FastAPI->>Chroma: Retrieve Relevant Context (RAG Similarity Search)
+    Chroma-->>FastAPI: Return ATS Guidelines & Rubrics
+    FastAPI->>FastAPI: Build Augmented Prompt (Schema + Rubrics + Resume)
+    FastAPI->>Groq: Request LLM Evaluation (JSON Mode)
+    Groq-->>FastAPI: Return Structured Evaluation JSON
+    FastAPI->>FastAPI: Post-Process & Validate JSON Schema
+    FastAPI-->>Express: Return Analysis Payload
     deactivate FastAPI
     
-    Express->>MongoDB: Save parsed data (Resume.parsedData)
-    Express->>MongoDB: Create AIAnalysis record (link applicationId)
-    MongoDB-->>Express: Confirm transactions saved
-    
-    Express-->>Candidate: Confirm application submitted successfully
-    deactivate Express
-
-    Note over Recruiter, MongoDB: Dashboard View Sequence
-    Recruiter->>Express: Open Recruiter Dashboard (Get application details)
     activate Express
-    Express->>MongoDB: Retrieve Application, Resume, and AIAnalysis
-    MongoDB-->>Express: Return documents
-    Express-->>Recruiter: Display Dashboard with instant AI screening insights
+    Express->>MongoDB: Update Resume collection (save parsedData)
+    Express->>MongoDB: Create AIAnalysis Document (link Application)
+    Express->>MongoDB: Update Application (Status: Under Review)
+    Express-->>Recruiter Dashboard: Send Real-Time Update
     deactivate Express
+    
+    Recruiter->>Express: View Application
+    Express->>MongoDB: Query Application & AIAnalysis
+    MongoDB-->>Express: Return structured metadata
+    Express-->>Recruiter: Display dashboard scorecard
 ```
+
+### Step-by-Step Workflow Phases
+
+1.  **Resume Upload:** The candidate submits an application containing a resume file (PDF/DOCX) through the React frontend.
+2.  **Supabase Storage:** The Express backend streams the file to Supabase Cloud Storage and receives a unique, read-only URL.
+3.  **Application Creation:** Express registers the new transaction inside MongoDB, creating the `Application` document with a `Received` status.
+4.  **REST Trigger:** Express sends an asynchronous HTTP POST request to the `/analyze` endpoint of the FastAPI service, passing the resume URL, job description, and job requirements.
+5.  **Resume Download:** The FastAPI service fetches the raw binary file from Supabase.
+6.  **Text Extraction:** The service extracts raw string contents, filtering layout wrappers, font markers, and styling artifacts.
+7.  **Resume Parsing:** Using high-speed Groq inference, the unstructured text is structured into a normalized profile schema (skills, education, projects, experience, certifications, technical skills, soft skills, personal information).
+8.  **RAG Context Querying:** FastAPI queries ChromaDB to locate candidate evaluations guides, ATS heuristics, and skill matrices matching the job profile.
+9.  **Prompt Augmentation:** The system compiles a prompt injecting the parsed resume, job description, RAG context, evaluation rubrics, and the required JSON schema.
+10. **Groq Analysis:** The model computes scores, extracts matched/missing skills, identifies strengths/weaknesses, and formulates recommendations.
+11. **Post-Processing:** FastAPI validates the JSON output against a Pydantic model to guarantee schema conformity and normalizes the generated scores.
+12. **Backend Delivery:** The structured JSON payload is returned to the Express API.
+13. **MongoDB Synchronization:** Express updates the candidate's `Resume` record with the `parsedData`, inserts the analysis object into the `AIAnalysis` collection, and marks the application as `Under Review`.
+14. **Dashboard Presentation:** The recruiter accesses the dashboard and immediately views the comprehensive evaluation scorecard.
 
 ---
 
-## 10. Benefits
+## 3. The Two-Pipeline Design
 
-The decoupled AI architecture of RecruitIQ offers significant operational and strategic benefits:
+RecruitIQ decouples its AI execution into two distinct pipelines. This division optimizes computational utilization and ensures runtime latency is minimized.
 
-*   **Zero-Delay Recruiter Dashboard:** Because evaluations are generated automatically upon application submission, recruiters experience instant loading times when viewing applicant details.
-*   **High Scalability:** Heavy PDF parsing and LLM orchestration are decoupled into FastAPI, preventing CPU blocking on the primary Node.js Express thread and ensuring high responsiveness for other transactional routes.
-*   **Domain-Grounded Precision:** RAG ensures evaluations match curated recruiting guidelines and skill matrices, preventing model hallucinations and promoting consistent scoring criteria.
-*   **Modular AI Separation:** The separation of the AI logic allows teams to update prompt templates, modify the Vector Database corpus, or switch LLM providers inside the FastAPI microservice without affecting the Express transactional database schemas or endpoints.
-*   **Candidate Progress Feedback:** Actionable resume feedback helps candidates understand why they did or did not match the role, improving the applicant experience.
+```mermaid
+graph TD
+    subgraph Pipeline 1 [Pipeline 1: Offline Knowledge Base]
+        A1[Raw Knowledge Docs] --> B1[Recursive Chunking]
+        B1 --> C1[Vector Embeddings]
+        C1 --> D1[(ChromaDB Index)]
+    end
+
+    subgraph Pipeline 2 [Pipeline 2: Online Resume Analysis]
+        A2[Candidate Application] --> B2[Download & Extract Text]
+        B2 --> C2[FastAPI / Groq Parser]
+        C2 --> D2[Parsed Resume JSON]
+        D2 & E2[Job Requisition] --> F2{Semantic Retrieval}
+        D1 --> F2
+        F2 --> G2[Augmented Prompt Engine]
+        G2 --> H2[Groq Scoring & Synthesis]
+        H2 --> I2[Express / MongoDB Persistence]
+    end
+```
+
+### Pipeline 1: Offline Knowledge Base Pipeline
+
+This pipeline runs asynchronously and only executes when the underlying evaluation corpus is created, updated, or expanded. It is completely isolated from candidate application submissions.
+
+*   **Inputs:** Recruiting benchmarks, ATS constraints, resume standards, domain-specific skill taxonomy matrices, and industry guidelines.
+*   **Workflow:** Documents are loaded, cleaned, chunked into overlapping segments, embedded into high-dimensional vector spaces, and saved to the ChromaDB vector store.
+*   **Frequency:** Executed on system startup, schedule syncs, or when administrators publish new guidelines.
+
+### Pipeline 2: Online Resume Analysis Pipeline
+
+This pipeline runs synchronously upon every application submission. It executes the runtime sequence of file extraction, parser structuring, context retrieval, LLM analysis, and schema verification.
+
+*   **Inputs:** The candidate's raw resume file (from Supabase) and the specific job listing parameters.
+*   **Workflow:** The runtime pipeline fetches, parses, matches, retrieves context from ChromaDB (using read-only semantic searches), requests Groq inference, and pushes data back to the core API.
+*   **Frequency:** Triggered on demand per candidate application.
+
+### Performance & Scalability Rationale
+
+1.  **Zero Embedding Creation at Runtime:** Generating high-dimensional vector embeddings from raw corporate guidelines is computationally expensive. The offline pipeline executes this work beforehand. At runtime, only a single query embedding (based on the job description and candidate experience) is generated to run the similarity lookup, saving critical processing seconds.
+2.  **Stateless Request Profiling:** The runtime pipeline executes as a collection of fast, stateless computations. ChromaDB handles concurrent vector read requests efficiently without lock contentions, allowing the FastAPI service to scale horizontally.
+3.  **Context Size Limitation:** Decoupling the indexing means the system retrieves only the top-$K$ relevant guidelines (usually 3 to 5 chunks) matching the candidate's exact profile. This minimizes token usage on the Groq API call, decreasing API costs, reducing latency, and preventing model distractions.
+
+---
+
+## 4. Pipeline 1: Offline Knowledge Base Ingestion
+
+The Offline Ingestion Pipeline creates the context database used to ground the LLM's evaluations.
+
+### Knowledge Sources
+
+*   **ATS Guidelines:** Criteria defining resume structural layout parameters (e.g., margins, font types, section headings) required for traditional parser compatibility.
+*   **Recruiter Best Practices:** Standardized methods to cross-evaluate experience levels (seniority ratios), assess tenure stability, and identify career trajectory trends.
+*   **Resume Writing Guides:** Conventions detailing high-impact communication strategies (e.g., metric-driven bullet points, structured descriptions).
+*   **Industry Hiring Articles:** Context maps linking adjacent technologies (e.g., mapping React to Vue as Frontend, or Express to FastAPI as Backend APIs) to enable semantic skill mapping.
+*   **Action Verb References:** Lexicons of action verbs (e.g., *designed*, *orchestrated*, *engineered*) linked to performance scoring.
+
+### Indexing Workflow Steps
+
+```mermaid
+graph LR
+    A[Load Knowledge Source] --> B[Text Cleansing]
+    B --> C[Recursive Splitter]
+    C --> D[Embedding Model]
+    D --> E[(ChromaDB Store)]
+```
+
+1.  **Load Documents:** Read raw unstructured text, markdown, and PDF assets from the system's local knowledge directory.
+2.  **Clean Documents:** Strip formatting markup, normalize unicode points, and resolve carriage return variations.
+3.  **Split Documents into Chunks:** Divide long documents into smaller segments using a recursive character text splitter.
+    *   *Purpose of Chunking:* Breaking documents into discrete blocks ensures that embeddings represent focused semantic topics, improving search relevance.
+    *   *Chunk Size:* 800 characters.
+    *   *Chunk Overlap:* 80 characters (10% boundary preservation to maintain semantic context across chunks).
+4.  **Generate Embeddings:** Convert each text segment into a dense, 1536-dimensional vector embedding representation using a high-density text embedding model.
+    *   *Purpose of Embeddings:* High-dimensional vectors capture the mathematical semantic meaning of the text, allowing similarity search beyond simple string keyword matching.
+5.  **Store Embeddings inside ChromaDB:** Write the generated vectors alongside their text and source metadata into a persistent ChromaDB collections index on disk.
+    *   *Purpose of Persistent Vector Storage:* Avoids repeating expensive document loading and embedding steps. It enables sub-millisecond semantic search retrieval on structured vector collections.
+
+*Note: Ingestion is executed offline and is NOT run during candidate resume analysis requests.*
+
+---
+
+## 5. Pipeline 2: Online AI Analysis Runtime
+
+The Online Resume Analysis Pipeline executes the parsing, RAG matching, scoring, and formatting stages.
+
+```mermaid
+graph TD
+    A[POST /analyze] --> B[Download PDF/DOCX]
+    B --> C[Extract Text]
+    C --> D[Groq Parser]
+    D --> E[Parsed Resume JSON]
+    E --> F[ChromaDB Similarity Search]
+    F --> G[Augmented Prompt Constructor]
+    G --> H[Groq Evaluation]
+    H --> I[Pydantic Validation & Normalization]
+    I --> J[Return JSON Payload]
+```
+
+### Step 1: Resume Download
+The FastAPI service downloads the document from the secure Supabase Storage URL. To minimize disk I/O overhead and prevent security concerns, the file binary is processed directly inside memory-mapped buffers. Both standard Portable Document Format (PDF) and Microsoft Word Open XML Document (DOCX) types are supported.
+
+### Step 2: Resume Text Extraction
+Specialized engines extract raw textual data:
+*   **PDF Processing:** PyPDF and PDFPlumber extract plain-text characters, maintaining vertical alignment blocks where possible.
+*   **DOCX Processing:** Python-docx extracts paragraph blocks and text tables sequentially.
+*   **Formatting Normalization:** The system collapses multiple consecutive whitespaces, converts bullet formats to standard dashes, removes non-printable characters, and strips document header/footer patterns.
+
+### Step 3: Resume Parsing (Structuring)
+The cleaned plain text is parsed into a structured candidate profile schema. FastAPI triggers a fast Groq LLM inference pass to extract and return a valid JSON object matching the following structure:
+*   **Personal Information:** Full name, email, phone number, and social links.
+*   **Technical Skills:** Programming languages, frameworks, developer tools, database engines.
+*   **Soft Skills:** Communication styles, management capabilities, project coordination strengths.
+*   **Work Experience:** Companies, roles, tenure durations, and key responsibilities.
+*   **Education:** Institutions, degrees completed, fields of study, graduation years.
+*   **Projects & Certifications:** Key projects, descriptions, and credentials.
+
+#### Separation of Parsing and Analysis
+Parsing is executed as an isolated stage before evaluation. If unstructured text is sent directly to the model alongside the scoring instructions, the LLM must handle two complex cognitive operations simultaneously: organizing text fields and evaluating qualifications. This leads to reasoning drift and hallucinations. Separating the tasks ensures:
+1.  The evaluation model receives a clean, structured JSON profile, improving scoring consistency.
+2.  The parsed data can be validated against strict schemas before analysis.
+3.  The parsed resume data is saved as a reusable asset, allowing candidates to apply to other jobs without re-running document parsing.
+
+### Step 4: Semantic Retrieval (RAG)
+Using the parsed resume skills and job requirements, FastAPI generates a semantic search query. This query searches the ChromaDB collections using cosine similarity metrics:
+$$\text{Similarity}(A, B) = \frac{A \cdot B}{\|A\|\|B\|}$$
+The system retrieves the Top-$K$ ($K=3$) most relevant chunks from the offline knowledge base. 
+*   **Top-K Retrieval:** Restricts context to the top $K$ semantic matches to limit the LLM context size, reducing token consumption and runtime latency.
+*   **Semantic Similarity Search:** Allows the system to identify related concepts and standards based on meaning, rather than relying on exact keyword matching.
+
+### Step 5: Prompt Augmentation
+The prompt builder constructs a single comprehensive prompt for the evaluation engine, containing:
+1.  **System Prompt:** Defines the evaluator persona, scoring guidelines, and structural rules.
+2.  **Job Requisition Parameters:** The requirements, duties, and preferences of the job description.
+3.  **Parsed Resume Profile:** The structured candidate data generated in Step 3.
+4.  **Retrieved Context Chunks:** Grounding guidelines extracted from ChromaDB in Step 4.
+5.  **Predefined Rubrics:** Criteria defining how to rate qualifications.
+6.  **Expected JSON Schema:** Constraints enforcing a valid output format.
+
+Prompt augmentation anchors the model's logic. By explicitly matching candidate qualifications against RAG guidelines, the LLM is forced to evaluate candidates using consistent criteria, improving score objectivity and preventing bias.
+
+### Step 6: Inference Generation
+FastAPI calls the Groq API (using the Llama-3-70B model in JSON mode) to evaluate the candidate. Groq generates:
+*   An executive summary of suitability.
+*   Overall score and individual dimension scores (ATS, Technical, Experience, Education, Projects).
+*   Lists of matched and missing skills.
+*   Categorized candidate strengths and weaknesses.
+*   Specific resume improvement recommendations.
+*   Pre-categorized recommendations (e.g., *Strong Match*, *Good Match*, *Borderline Match*, *Unsuitable*).
+
+### Step 7: Post-Processing & Validation
+The FastAPI service validates the returned JSON payload against a strict **Pydantic** schema. If fields are missing or schema constraints are violated, the pipeline retries the request with a corrected prompt. Scores are normalized to fall within the $[0, 100]$ range.
+
+---
+
+## 6. RAG Architecture and Canonical Stages
+
+RecruitIQ's Retrieval-Augmented Generation implementation relies on the five canonical RAG processing phases:
+
+```mermaid
+graph TD
+    subgraph STAGE 1: Indexing
+        A1[Knowledge Corpus] --> B1[Text Cleansing]
+        B1 --> C1[Recursive Character Splitter]
+        C1 --> D1[Embedding Engine]
+        D1 --> E1[(ChromaDB Index)]
+    end
+
+    subgraph STAGE 2: Retrieval
+        A2[Query: Job + Candidate] --> B2[Query Embeddings]
+        B2 --> C2{ChromaDB Cosine Search}
+        E1 --> C2
+        C2 --> D2[Top K Context Chunks]
+    end
+
+    subgraph STAGE 3: Augmentation
+        D2 & F2[System Rules] & G2[Structured Resume] & H2[Job Post] --> I2[Prompt Augmentation Engine]
+    end
+
+    subgraph STAGE 4: Generation
+        I2 --> J2[Groq Inference Engine]
+        J2 --> K2[Raw LLM Output]
+    end
+
+    subgraph STAGE 5: Post-Processing
+        K2 --> L2{Pydantic Schema Check}
+        L2 -->|Valid| M2[Final Scorecard JSON]
+        L2 -->|Invalid| N2[Retry Request]
+    end
+```
+
+### The Five Canonical Stages
+
+| Stage | Responsibility / Operation | RecruitIQ Implementation |
+| :--- | :--- | :--- |
+| **1. Indexing** | Converts offline unstructured knowledge documents into structured search indexes. | Segments recruitment guides into 800-character chunks, generates 1536-dimensional embeddings, and indexes them in ChromaDB. |
+| **2. Retrieval** | Searches the vector database using query embeddings to find context segments. | Creates query vectors from job specs and candidate profiles, executing a cosine similarity lookup to find the top 3 matches. |
+| **3. Augmentation** | Combines retrieved context blocks with active user parameters into a single prompt. | Injects ChromaDB matches, parsed resume structures, job requisitions, and scoring guidelines into the prompt layout. |
+| **4. Generation** | Sends the augmented prompt to the LLM to generate the structured evaluation. | Executes Llama inference via Groq, enforcing output constraints using JSON mode. |
+| **5. Post-Processing** | Validates, normalizes, and filters the generated response to ensure consistency. | Parses the JSON payload with Pydantic, validates required fields, normalizes scores, and returns the response. |
+
+---
+
+## 7. Scoring Strategy
+
+To ensure objective evaluations, RecruitIQ evaluates candidate profiles across multiple dimensions based on predefined rubrics:
+
+*   **ATS Score:** Evaluates resume layout readability, proper section headers, absence of complex graphic overlays, and contact details completeness.
+*   **Technical Skills:** Evaluates candidate technical capabilities against the job requirements. Analyzes direct matches, semantic matches, and secondary tools.
+*   **Experience:** Evaluates work history duration, role seniority levels, company size, and progressive career advancement. Deducts points for unstable tenures or structural role mismatches.
+*   **Education:** Compares academic credentials (degrees, majors) against job requirements. Awarded based on academic level and field relevance.
+*   **Projects:** Evaluates project descriptions, technical complexity, and alignment with job requirements.
+*   **Overall Score:** A weighted average calculated using the individual dimensions.
+*   **Recommendation:** An actionable hiring recommendation generated based on the overall score.
+
+### Predefined Evaluation Rubrics
+Rather than letting the LLM calculate scores arbitrarily, RecruitIQ uses explicit scoring rules:
+*   *Score of 90-100:* All requirements are met, with exceeding experience or skills.
+*   *Score of 75-89:* Meet all primary requirements, with minor gaps in secondary parameters.
+*   *Score of 50-74:* Meet most requirements, but with gaps in primary technologies or experience.
+*   *Score below 50:* Major gaps in core requirements and experience.
+
+The overall matching score is calculated using the following weights:
+
+$$\text{Overall Score} = (\text{Technical} \times 0.35) + (\text{Experience} \times 0.35) + (\text{ATS} \times 0.15) + (\text{Education} \times 0.15)$$
+
+Recommendations are categorized into four types based on the overall score:
+*   **Strong Match:** $\text{Overall Score} \ge 85$
+*   **Good Match:** $70 \le \text{Overall Score} < 85$
+*   **Borderline Match:** $50 \le \text{Overall Score} < 70$
+*   **Unsuitable:** $\text{Overall Score} < 50$
+
+---
+
+## 8. Data Persistence
+
+RecruitIQ splits data persistence across three dedicated MongoDB collections: `Resume`, `AIAnalysis`, and `Application`.
+
+```mermaid
+erDiagram
+    APPLICATION ||--|| AI_ANALYSIS : "1:1 Link (applicationId)"
+    RESUME ||--o{ APPLICATION : "1:N Link (resumeId)"
+```
+
+### 1. Resume Collection (`parsedData` field)
+Stores the structured profile schema generated during the parsing stage (skills, education, projects, experience, certifications).
+*   *Purpose:* Retains the normalized, extracted resume structure.
+*   *Design Decision:* Storing parsed data inside the `Resume` collection decouples parsing from job-specific evaluations. This data is persistent and can be reused if the candidate applies to other jobs, saving processing time and API costs.
+
+### 2. AIAnalysis Collection (`analysis` object)
+Stores the scoring scorecard, matched/missing skills lists, strengths/weaknesses, and improvement suggestions.
+*   *Purpose:* Retains the job-specific evaluation results.
+*   *Design Decision:* Stored in a separate collection linked to the `Application` record via `applicationId`. Since job requirements vary, a candidate's resume will generate different scores for different jobs. Separating analysis records ensures evaluation histories remain distinct.
+
+### 3. Application Collection (`analysis` reference)
+Tracks the connection between candidate, job, resume, and the evaluation status.
+*   *Purpose:* Acts as the transactional controller.
+*   *Design Decision:* Storing application status and basic references separately from the detailed analysis lets the system query and list applications quickly on the recruiter dashboard, without loading large analysis text fields until requested.
+
+---
+
+## 9. Architectural Decisions
+
+| Decision Area | Selected Technology | Architectural Rationale & Trade-offs |
+| :--- | :--- | :--- |
+| **AI Service (FastAPI)** | **Python FastAPI** | Selected for Python's ecosystem of ML, NLP, and text extraction libraries. FastAPI provides asynchronous request handling, auto-generated OpenAPI documentation, and low-latency performance. |
+| **Orchestrator (Express)** | **Express.js Backend** | Acts as the primary backend orchestrator, handling authentication, RBAC, application workflows, and file uploads. Decoupling this from the AI service keeps the FastAPI service stateless and focused on pipeline execution. |
+| **Resume Storage** | **Supabase Storage** | Provides S3-compatible cloud storage with CDN caching and secure token-based URL access. This decouples binary files from the databases. |
+| **Metadata DB** | **MongoDB Atlas** | Document-oriented storage natively maps to nested JSON payloads, such as the parsed resume structures, without requiring complex schema mapping. |
+| **Vector DB** | **ChromaDB** | An in-process, lightweight vector database that provides fast setup and persistent local storage. ChromaDB performs fast semantic similarity searches without the operational overhead of cloud-hosted alternatives. |
+| **Reasoning Engine** | **Groq API** | Provides sub-second inference speeds for Llama models. Fast inference reduces candidate submission latency and API timeout risks. |
+| **Parsing Separation** | **Isolated Parsing Step** | Splitting parsing (text-to-JSON) from evaluation (JSON-to-scorecard) improves scoring consistency and reduces model hallucinations. It also lets the system save and reuse parsed resume structures. |
+| **Offline Ingestion** | **Pre-Indexed Knowledge Base** | Processing guidelines and writing embeddings offline keeps the runtime analysis pipeline fast, saving processing time during candidate application. |
+| **AI Statelessness** | **Stateless FastAPI Service** | The FastAPI service does not maintain state or connect to MongoDB. It receives inputs, runs the analysis pipeline, and returns the result. This simplifies scaling and service boundaries. |
+
+---
+
+## 10. System Benefits
+
+The redesigned RecruitIQ AI architecture delivers the following benefits:
+
+*   **Automatic Analysis:** Resume screening runs automatically immediately after application submission, removing the need for manual recruiter triggers.
+*   **No Recruiter Interventions:** Preliminary screening results are generated in the background and stored directly in the database.
+*   **Reduced Latency:** Offloading text parsing and leveraging Groq's high-speed inference keeps application processing fast, reducing client API timeouts.
+*   **Scalable AI Microservices:** Decoupling the AI service from the main backend protects the transactional Express API from CPU-heavy parsing workloads.
+*   **Separation of Concerns:** Independent database interfaces, file management steps, and LLM routes ensure cleaner code organization.
+*   **Reusable Knowledge Base:** Indexing guidelines offline allows the system to reuse the context vector database for all evaluations without re-indexing.
+*   **Improved Productivity:** Recruiters can view applicant rankings and evaluations instantly on the dashboard, reducing manual screening time.
+*   **Future Extensibility:** The decoupled microservice design makes it easy to update prompt templates, modify the Vector Database corpus, or switch LLM models inside the FastAPI service without affecting Express endpoints.
